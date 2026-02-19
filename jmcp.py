@@ -30,6 +30,7 @@ import json
 import yaml
 import sys
 import signal
+from pathlib import Path
 from typing import Any, Sequence
 from collections.abc import AsyncIterator, Awaitable, Callable, Iterable, Sequence
 
@@ -624,14 +625,18 @@ def check_config_blocklist(config_text: str, block_file: str = "block.cfg") -> t
     if not config_text:
         return False, None
 
-    if not os.path.exists(block_file):
+    block_file_path = Path(block_file)
+    if not block_file_path.is_absolute() and not block_file_path.exists():
+        block_file_path = Path(__file__).resolve().parent / block_file
+
+    if not block_file_path.exists():
         return False, None
 
     try:
-        with open(block_file, "r", encoding="utf-8") as f:
+        with open(block_file_path, "r", encoding="utf-8") as f:
             blocked_patterns = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
     except OSError as e:
-        return True, f"Error: unable to read blocklist file '{block_file}': {e}"
+        return True, f"Error: unable to read blocklist file '{block_file_path}': {e}"
 
     config_lines = [" ".join(line.split()) for line in config_text.splitlines() if line.strip()]
 
@@ -693,7 +698,7 @@ def check_config_blocklist(config_text: str, block_file: str = "block.cfg") -> t
                         token_match = False
                         break
                 except re.error as e:
-                    return True, f"Error: invalid regex in '{block_file}': '{pattern_token}' ({e})"
+                    return True, f"Error: invalid regex in '{block_file_path}': '{pattern_token}' ({e})"
 
             if token_match:
                 return True, (

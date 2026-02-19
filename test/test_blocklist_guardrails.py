@@ -58,6 +58,23 @@ class BlocklistGuardrailsTests(unittest.TestCase):
             self.assertTrue(blocked)
             self.assertIn("set system login user ([^ ]+) authentication", message)
 
+    def test_uses_repo_block_cfg_when_cwd_differs(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            original_cwd = Path.cwd()
+            try:
+                # Ensure no local block.cfg exists in temporary cwd
+                import os
+                os.chdir(tmpdir)
+                blocked, message = check_config_blocklist(
+                    "set system login user guardx authentication encrypted-password",
+                    block_file="block.cfg",
+                )
+            finally:
+                os.chdir(original_cwd)
+
+            self.assertTrue(blocked)
+            self.assertIn("set system login user ([^ ]+) authentication", message)
+
     def test_allows_non_blocked_config(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             block_file = Path(tmpdir) / "block.cfg"
