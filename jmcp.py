@@ -620,7 +620,7 @@ def get_timeout_with_fallback(arguments_timeout: int = None) -> int:
 
 
 def check_config_blocklist(config_text: str, block_file: str = "block.cfg") -> tuple[bool, str | None]:
-    """Return whether the submitted config should be blocked based on regex patterns in block_file."""
+    """Return whether the submitted config should be blocked based on tokenized regex patterns."""
     if not config_text:
         return False, None
 
@@ -633,27 +633,69 @@ def check_config_blocklist(config_text: str, block_file: str = "block.cfg") -> t
     except OSError as e:
         return True, f"Error: unable to read blocklist file '{block_file}': {e}"
 
-    normalized_config_lines = [" ".join(line.split()) for line in config_text.splitlines() if line.strip()]
+    config_lines = [" ".join(line.split()) for line in config_text.splitlines() if line.strip()]
+
+    def split_pattern_tokens(pattern_line: str) -> list[str]:
+        """Split pattern into tokens while preserving spaces inside regex char classes like `[^ ]+`."""
+        tokens: list[str] = []
+        current: list[str] = []
+        in_char_class = False
+        escaped = False
+
+        for ch in pattern_line:
+            if escaped:
+                current.append(ch)
+                escaped = False
+                continue
+
+            if ch == "\\":
+                current.append(ch)
+                escaped = True
+                continue
+
+            if ch == "[":
+                in_char_class = True
+                current.append(ch)
+                continue
+
+            if ch == "]" and in_char_class:
+                in_char_class = False
+                current.append(ch)
+                continue
+
+            if ch.isspace() and not in_char_class:
+                if current:
+                    tokens.append("".join(current))
+                    current = []
+                continue
+
+            current.append(ch)
+
+        if current:
+            tokens.append("".join(current))
+
+        return tokens
 
     for pattern in blocked_patterns:
-        normalized_pattern = " ".join(pattern.split())
+        pattern_tokens = split_pattern_tokens(pattern)
 
-        # Prefer least-token matching for wildcard forms commonly used in block.cfg.
-        # Example: `(.*)` should match one token (no spaces), equivalent to `([^ ]+)`.
-        if "(.*)" in normalized_pattern:
-            candidate_patterns = [normalized_pattern.replace("(.*)", "([^ ]+)")]
-        else:
-            candidate_patterns = [normalized_pattern]
+        for config_line in config_lines:
+            config_tokens = config_line.split()
 
-        compiled_patterns = []
-        for candidate_pattern in candidate_patterns:
-            try:
-                compiled_patterns.append(re.compile(rf"^(?:{candidate_pattern})(?:\s|$)"))
-            except re.error as e:
-                return True, f"Error: invalid regex in '{block_file}': '{pattern}' ({e})"
+            # Prefix-style token match: all pattern tokens must match the first N config tokens.
+            if len(config_tokens) < len(pattern_tokens):
+                continue
 
-        for config_line in normalized_config_lines:
-            if any(compiled_pattern.match(config_line) for compiled_pattern in compiled_patterns):
+            token_match = True
+            for config_token, pattern_token in zip(config_tokens, pattern_tokens):
+                try:
+                    if not re.fullmatch(pattern_token, config_token):
+                        token_match = False
+                        break
+                except re.error as e:
+                    return True, f"Error: invalid regex in '{block_file}': '{pattern_token}' ({e})"
+
+            if token_match:
                 return True, (
                     f"Blocked configuration rejected: line '{config_line}' matches blocked pattern '{pattern}'"
                 )
