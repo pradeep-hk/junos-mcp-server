@@ -21,6 +21,7 @@ from __future__ import annotations as _annotations
 
 import argparse
 import time
+import re
 from datetime import datetime, timezone
 import logging
 import os
@@ -616,6 +617,37 @@ def get_timeout_with_fallback(arguments_timeout: int = None) -> int:
             log.warning(f"Invalid JUNOS_TIMEOUT environment variable value: {env_timeout}. Using default timeout.")
 
     return 360
+
+
+def check_config_blocklist(config_text: str, block_file: str = "block.cfg") -> tuple[bool, str | None]:
+    """Return whether the submitted config should be blocked based on regex patterns in block_file."""
+    if not config_text:
+        return False, None
+
+    if not os.path.exists(block_file):
+        return False, None
+
+    try:
+        with open(block_file, "r", encoding="utf-8") as f:
+            blocked_patterns = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
+    except OSError as e:
+        return True, f"Error: unable to read blocklist file '{block_file}': {e}"
+
+    config_lines = [line.strip() for line in config_text.splitlines() if line.strip()]
+
+    for pattern in blocked_patterns:
+        try:
+            compiled_pattern = re.compile(pattern)
+        except re.error as e:
+            return True, f"Error: invalid regex in '{block_file}': '{pattern}' ({e})"
+
+        for config_line in config_lines:
+            if compiled_pattern.match(config_line):
+                return True, (
+                    f"Blocked configuration rejected: line '{config_line}' matches blocked pattern '{pattern}'"
+                )
+
+    return False, None
 
 def validate_token_from_file(token: str) -> bool:
     """Validate if a token exists in the .tokens file"""
@@ -1371,8 +1403,11 @@ async def handle_load_and_commit_config(arguments: dict, context: Context) -> li
     config_format = arguments.get("config_format", "set")
     commit_comment = arguments.get("commit_comment", "Configuration loaded via MCP")
     timeout = get_timeout_with_fallback(arguments.get("timeout"))
-    
-    if router_name not in devices:
+
+    is_blocked, blocked_message = check_config_blocklist(config_text)
+    if is_blocked:
+        result = blocked_message
+    elif router_name not in devices:
         result = f"Router {router_name} not found in the device mapping."
     else:
         log.debug(f"Loading and committing config on router {router_name} with format {config_format}")
