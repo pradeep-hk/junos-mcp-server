@@ -630,7 +630,7 @@ def check_config_blocklist(config_text: str, block_file: str = "block.cfg") -> t
         block_file_path = Path(__file__).resolve().parent / block_file
 
     if not block_file_path.exists():
-        return False, None
+        return True, f"Error: blocklist file '{block_file_path}' not found. Refusing to apply configuration."
 
     try:
         with open(block_file_path, "r", encoding="utf-8") as f:

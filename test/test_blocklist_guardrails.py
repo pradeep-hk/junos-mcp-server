@@ -75,6 +75,18 @@ class BlocklistGuardrailsTests(unittest.TestCase):
             self.assertTrue(blocked)
             self.assertIn("set system login user ([^ ]+) authentication", message)
 
+    def test_missing_block_file_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            missing_file = Path(tmpdir) / "does-not-exist.cfg"
+
+            blocked, message = check_config_blocklist(
+                "set interfaces ge-0/0/0 description test",
+                block_file=str(missing_file),
+            )
+
+            self.assertTrue(blocked)
+            self.assertIn("not found", message)
+
     def test_allows_non_blocked_config(self):
         with tempfile.TemporaryDirectory() as tmpdir:
             block_file = Path(tmpdir) / "block.cfg"
