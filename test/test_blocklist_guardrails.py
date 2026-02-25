@@ -3,7 +3,7 @@ import unittest
 import mcp.types as types
 from pathlib import Path
 
-from jmcp import check_config_blocklist, _is_error_content
+from jmcp import check_command_blocklist, check_config_blocklist, _is_error_content
 
 
 class BlocklistGuardrailsTests(unittest.TestCase):
@@ -102,12 +102,75 @@ class BlocklistGuardrailsTests(unittest.TestCase):
             self.assertIsNone(message)
 
 
+class CommandBlocklistGuardrailsTests(unittest.TestCase):
+    def test_blocks_literal_prefix_pattern(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            block_file = Path(tmpdir) / "block.cmd"
+            block_file.write_text("request system reboot\n", encoding="utf-8")
+
+            blocked, message = check_command_blocklist(
+                "request system reboot in 1",
+                block_file=str(block_file),
+            )
+
+            self.assertTrue(blocked)
+            self.assertIn("matches blocked pattern", message)
+
+    def test_blocks_regex_prefix_pattern(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            block_file = Path(tmpdir) / "block.cmd"
+            block_file.write_text("request system reboot(.*)\n", encoding="utf-8")
+
+            blocked, message = check_command_blocklist(
+                "request system reboot at 22:00",
+                block_file=str(block_file),
+            )
+
+            self.assertTrue(blocked)
+            self.assertIn("request system reboot(.*)", message)
+
+    def test_allows_non_blocked_command(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            block_file = Path(tmpdir) / "block.cmd"
+            block_file.write_text("request system reboot\n", encoding="utf-8")
+
+            blocked, message = check_command_blocklist(
+                "show interfaces terse",
+                block_file=str(block_file),
+            )
+
+            self.assertFalse(blocked)
+            self.assertIsNone(message)
+
+    def test_missing_block_file_fails_closed(self):
+        with tempfile.TemporaryDirectory() as tmpdir:
+            missing_file = Path(tmpdir) / "does-not-exist.cmd"
+
+            blocked, message = check_command_blocklist(
+                "show version",
+                block_file=str(missing_file),
+            )
+
+            self.assertTrue(blocked)
+            self.assertIn("not found", message)
+
+
+
 class ToolErrorClassificationTests(unittest.TestCase):
     def test_blocked_message_is_error(self):
         blocks = [
             types.TextContent(
                 type="text",
                 text="Blocked configuration rejected: line 'x' matches blocked pattern 'y'",
+            )
+        ]
+        self.assertTrue(_is_error_content(blocks))
+
+    def test_blocked_command_message_is_error(self):
+        blocks = [
+            types.TextContent(
+                type="text",
+                text="Blocked command rejected: command 'request system reboot now' matches blocked pattern 'request system reboot'",
             )
         ]
         self.assertTrue(_is_error_content(blocks))
