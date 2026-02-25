@@ -26,7 +26,7 @@ async def main():
     MCP_URL = f"http://{MCP_SERVER}:{MCP_PORT}/mcp"
 
     DEVICE_NAME = get_env_variable("DEVICE_NAME_FOR_EXECUTE_JUNOS_COMMAND")
-    COMMAND = os.getenv("JUNOS_COMMAND_TO_EXECUTE", "show version")
+    COMMAND = get_env_variable("JUNOS_COMMAND_TO_EXECUTE")
 
     # Connect to the streamable HTTP MCP server
     async with streamablehttp_client(MCP_URL) as (read_stream, write_stream, _):
