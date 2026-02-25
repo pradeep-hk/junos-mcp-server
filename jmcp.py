@@ -707,6 +707,42 @@ def check_config_blocklist(config_text: str, block_file: str = "block.cfg") -> t
 
     return False, None
 
+
+def check_command_blocklist(command: str, block_file: str = "block.cmd") -> tuple[bool, str | None]:
+    """Return whether the submitted operational command should be blocked.
+
+    Each non-comment line in block.cmd is treated as a regex prefix pattern. If the
+    normalized command starts with any pattern, command execution is rejected.
+    """
+    if not command:
+        return False, None
+
+    block_file_path = Path(block_file)
+    if not block_file_path.is_absolute() and not block_file_path.exists():
+        block_file_path = Path(__file__).resolve().parent / block_file
+
+    if not block_file_path.exists():
+        return True, f"Error: blocklist file '{block_file_path}' not found. Refusing to execute command."
+
+    try:
+        with open(block_file_path, "r", encoding="utf-8") as f:
+            blocked_patterns = [line.strip() for line in f if line.strip() and not line.strip().startswith("#")]
+    except OSError as e:
+        return True, f"Error: unable to read blocklist file '{block_file_path}': {e}"
+
+    normalized_command = " ".join(command.split())
+
+    for pattern in blocked_patterns:
+        try:
+            if re.match(pattern, normalized_command):
+                return True, (
+                    f"Blocked command rejected: command '{normalized_command}' matches blocked pattern '{pattern}'"
+                )
+        except re.error as e:
+            return True, f"Error: invalid regex in '{block_file_path}': '{pattern}' ({e})"
+
+    return False, None
+
 def validate_token_from_file(token: str) -> bool:
     """Validate if a token exists in the .tokens file"""
     try:
@@ -783,7 +819,10 @@ async def handle_execute_junos_command(arguments: dict, context: Context) -> lis
     command = arguments.get("command", "")
     timeout = get_timeout_with_fallback(arguments.get("timeout"))
 
-    if router_name not in devices:
+    is_blocked, blocked_message = check_command_blocklist(command)
+    if is_blocked:
+        result = blocked_message
+    elif router_name not in devices:
         result = f"Router {router_name} not found in the device mapping."
     else:
         log.debug(f"Executing command {command} on router {router_name} with timeout {timeout}s")
@@ -850,6 +889,10 @@ async def handle_execute_junos_command_batch(arguments: dict, context: Context) 
             type="text",
             text="Error: command is required"
         )]
+
+    is_blocked, blocked_message = check_command_blocklist(command)
+    if is_blocked:
+        return [types.TextContent(type="text", text=blocked_message)]
 
     # Validate all routers exist before executing - prevents partial failures
     invalid_routers = [r for r in router_names if r not in devices]
@@ -1544,6 +1587,7 @@ def _is_error_content(content_blocks: list[types.ContentBlock]) -> bool:
         "an error occurred",
         "❌",
         "blocked configuration rejected",
+        "blocked command rejected",
         "unknown tool",
     )
 
